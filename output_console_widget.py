@@ -54,14 +54,14 @@ class OutputConsole(ctk.CTkFrame):
         self.badge_frame.pack(side="left", fill="x", expand=True)
         
         self.badges = {}
-        badge_configs = [
+        self.badge_configs = [
             ("Debug", logging.DEBUG, "#6B8E23"),
             ("Info", logging.INFO, "gray"),
             ("Warning", logging.WARNING, "#FFD93D"),
             ("Error", logging.ERROR, "#FF6B6B")
         ]
         
-        for label, level, color in badge_configs:
+        for label, level, color in self.badge_configs:
             badge_container = ctk.CTkFrame(self.badge_frame, fg_color="transparent")
             badge_container.pack(side="left", padx=10, pady=4)
             
@@ -90,9 +90,16 @@ class OutputConsole(ctk.CTkFrame):
         )
         self.pop_out_button.pack(side="right", padx=5, pady=4)
 
+        # Initialize message storage
+        self.stored_messages = []
+
     def append_message(self, message: TextOutputConsoleMessage):
         """Append a message to the console"""
         print("Appending message to console")
+        
+        # Store the message
+        self.stored_messages.append(message)
+        
         # Update counter for message level
         self.message_counters[message.level] += 1
         if message.level in self.badges:
@@ -120,13 +127,14 @@ class OutputConsole(ctk.CTkFrame):
         self.message_count += 1
         
         # Auto-scroll to bottom
-        self.scrollable_container._parent_canvas.yview_moveto(0.99)
+        self.scrollable_container._parent_canvas.yview_moveto(1.0)
 
     def toggle_pop_out(self):
         """Toggle between embedded and pop-out states"""
         if not self.popped_out:
             if hasattr(self, '_pop_out_callback'):
                 self._pop_out_callback(True)
+            
             # Create pop-out window
             self.popup_window = ctk.CTkToplevel(self)
             self.popup_window.title("Output Console")
@@ -134,83 +142,100 @@ class OutputConsole(ctk.CTkFrame):
             self.popup_window.grid_rowconfigure(0, weight=1)
             self.popup_window.grid_columnconfigure(0, weight=1)
             
-            # Move the content frame to pop-out window
-            self.content_frame.grid_remove()
-            self.content_frame.grid(in_=self.popup_window, row=0, column=0)
+            # Store original widgets
+            self.original_content = self.content_frame
+            self.original_scrollable = self.scrollable_container
+            self.original_toolbar = self.toolbar
             
-            # Handle window close
-            self.popup_window.protocol("WM_DELETE_WINDOW", self.toggle_pop_out)
-            self.popped_out = True
-        else:
-            if hasattr(self, '_pop_out_callback'):
-                self._pop_out_callback(False)
+            # Create new content frame for pop-out window
+            self.content_frame = ctk.CTkFrame(self.popup_window)
+            self.content_frame.grid(row=0, column=0, sticky="nsew")
+            self.content_frame.grid_rowconfigure(0, weight=1)
+            self.content_frame.grid_columnconfigure(0, weight=1)
             
-            # Move content frame back to main window
-            self.content_frame.grid_remove()
-            self.content_frame.grid(in_=self, row=0, column=0, sticky="nsew")
+            # Create new scrollable container
+            self.scrollable_container = ctk.CTkScrollableFrame(
+                self.content_frame,
+                label_text="Console Output"
+            )
+            self.scrollable_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+            self.scrollable_container.grid_columnconfigure(0, weight=1)
             
-            # Clean up pop-out window
-            if self.popup_window:
-                self.popup_window.destroy()
-                self.popup_window = None
-            
-            self.popped_out = False
-
-        """Toggle between embedded and pop-out states"""
-        if not self.popped_out:
-            if hasattr(self, '_pop_out_callback'):
-                self._pop_out_callback(True)
-            # Create pop-out window
-            self.popup_window = ctk.CTkToplevel(self)
-            self.popup_window.title("Output Console")
-            self.popup_window.geometry("600x400")
-            self.popup_window.grid_rowconfigure(0, weight=1)
-            self.popup_window.grid_columnconfigure(0, weight=1)
-            
-            # Hide the content frame in main window
-            self.content_frame.grid_remove()
-            
-            # Create a new frame in the pop-out window
-            popup_frame = ctk.CTkFrame(self.popup_window)
-            popup_frame.grid(row=0, column=0, sticky="nsew")
-            popup_frame.grid_rowconfigure(0, weight=1)
-            popup_frame.grid_columnconfigure(0, weight=1)
-            
-            # Create new scrollable frame for pop-out window
-            self.popup_scrollable = ctk.CTkScrollableFrame(popup_frame)
-            self.popup_scrollable.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-            
-            # Copy all message widgets to pop-out window
-            for idx, msg in enumerate(self.messages):
-                widget = LogMessageWidget(
-                    self.popup_scrollable,
-                    msg['message'],
-                    msg['level']
-                )
+            # Recreate messages from stored list
+            for idx, message in enumerate(self.stored_messages):
+                if message.details is not None:
+                    widget = CollapsibleLogMessageWidget(
+                        self.scrollable_container,
+                        message=message.msg,
+                        level=message.level,
+                        details=message.details,
+                        action_text=message.action_text,
+                        action_callback=message.action_callback
+                    )
+                else:
+                    widget = LogMessageWidget(
+                        self.scrollable_container,
+                        message.msg,
+                        message.level
+                    )
                 widget.grid(row=idx, column=0, sticky="ew", padx=2, pady=1)
             
-            # Create new toolbar for pop-out window
-            popup_toolbar = ctk.CTkFrame(popup_frame)
-            popup_toolbar.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 5))
+            # Create new toolbar
+            self.toolbar = ctk.CTkFrame(self.content_frame)
+            self.toolbar.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 5))
             
-            # Create new dock button
-            popup_button = ctk.CTkButton(
-                popup_toolbar,
+            # Recreate badges in new toolbar
+            self.badge_frame = ctk.CTkFrame(self.toolbar, fg_color="transparent")
+            self.badge_frame.pack(side="left", fill="x", expand=True)
+            
+            # Copy badge configurations
+            self.badges = {}  # Reset badges dictionary
+            for label, level, color in self.badge_configs:
+                badge_container = ctk.CTkFrame(self.badge_frame, fg_color="transparent")
+                badge_container.pack(side="left", padx=10, pady=4)
+                
+                text_label = ctk.CTkLabel(badge_container, text=label)
+                text_label.pack(side="left")
+                
+                counter_label = ctk.CTkLabel(
+                    badge_container,
+                    text=self.message_counters[level],
+                    width=30,
+                    height=30,
+                    fg_color=color,
+                    corner_radius=30,
+                    text_color="black" if level == logging.WARNING else "white"
+                )
+                counter_label.pack(side="left", padx=(5, 0))
+                self.badges[level] = counter_label
+            
+            # Add dock button
+            self.pop_out_button = ctk.CTkButton(
+                self.toolbar,
                 text="Dock",
                 width=80,
                 command=self.toggle_pop_out
             )
-            popup_button.pack(side="right", padx=5)
+            self.pop_out_button.pack(side="right", padx=5, pady=4)
+            
+            # Hide original content
+            self.original_content.grid_remove()
             
             # Handle window close
             self.popup_window.protocol("WM_DELETE_WINDOW", self.toggle_pop_out)
             self.popped_out = True
+            
         else:
             if hasattr(self, '_pop_out_callback'):
                 self._pop_out_callback(False)
             
-            # Show the content frame back in main window
-            self.content_frame.grid()
+            # Restore original widgets
+            self.content_frame = self.original_content
+            self.scrollable_container = self.original_scrollable
+            self.toolbar = self.original_toolbar
+            
+            # Show original content
+            self.content_frame.grid(row=0, column=0, sticky="nsew")
             
             # Clean up pop-out window
             if self.popup_window:
@@ -218,7 +243,6 @@ class OutputConsole(ctk.CTkFrame):
                 self.popup_window = None
             
             self.popped_out = False
-            self.update_visible_widgets()  # Refresh the main window widgets
 
     def bind_pop_out_callback(self, callback):
         """Bind a callback function to handle pop-out state changes"""
