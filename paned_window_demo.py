@@ -2,6 +2,8 @@ import customtkinter as ctk
 from tkinter import ttk
 from output_console_widget import OutputConsole
 import logging
+from output_console_message import TextOutputConsoleMessage
+from datetime import datetime
 
 class PanedWindowDemo:
     def __init__(self):
@@ -67,8 +69,17 @@ class PanedWindowDemo:
     def increment_counter(self):
         self.counter += 1
         self.counter_label.configure(text=f"Count: {self.counter}")
-        # Use logger instead of direct append_message
-        self.logger.info(f"Counter incremented to: {self.counter}")
+        
+        
+        msg=f"Counter incremented to: {self.counter}"
+        level=logging.INFO
+        details=f"""Counter Details:\n
+                - Previous value: {self.counter - 1}\n"
+                - Current value: {self.counter}\n"
+                - Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+        
+        self.logger.info(msg, extra={'details': details})
+
 
     def handle_console_pop_out(self, is_popped_out: bool):
         if is_popped_out:

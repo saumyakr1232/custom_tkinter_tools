@@ -2,41 +2,13 @@ import customtkinter as ctk
 from tkinter import ttk
 from typing import Optional, List, Dict
 import logging
-
-class LogMessageWidget(ctk.CTkFrame):
-    def __init__(self, master, message: str, level: int, **kwargs):
-        super().__init__(master, **kwargs)
-        self.grid_columnconfigure(0, weight=1)
-        
-        bg_color = self._get_level_color(level)
-        self.configure(fg_color=bg_color)
-        
-        self.message_label = ctk.CTkLabel(
-            self,
-            text=message,
-            anchor="w",
-            justify="left",
-            wraplength=800
-        )
-        self.message_label.grid(row=0, column=0, sticky="ew", padx=5, pady=2)
-    
-    def _get_level_color(self, level: int) -> str:
-        if level >= logging.ERROR:
-            return "#3a2a2a"  # Dark red
-        elif level >= logging.WARNING:
-            return "#3a362a"  # Dark yellow
-        elif level >= logging.INFO:
-            return "transparent"
-        return "#2a2a3a"  # Dark blue for debug
+from pprint import pprint
+from log_message_widget import LogMessageWidget, CollapsibleLogMessageWidget
+from output_console_message import OutputConsoleMessage, TextOutputConsoleMessage
 
 class OutputConsole(ctk.CTkFrame):
-    BUFFER_SIZE = 50  # Number of extra widgets to keep in memory
-    WIDGET_HEIGHT = 30  # Approximate height of each message widget
 
-    def bind_pop_out_callback(self, callback):
-        """Bind a callback function to handle pop-out state changes"""
-        self._pop_out_callback = callback
-        
+
     def __init__(self, master, **kwargs):
         self.popped_out = False
         self.popup_window = None
@@ -61,6 +33,53 @@ class OutputConsole(ctk.CTkFrame):
         # Create toolbar frame
         self.toolbar = ctk.CTkFrame(self.content_frame)
         self.toolbar.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 5))
+        
+        # Initialize message counters
+        self.message_counters = {
+            logging.DEBUG: 0,
+            logging.INFO: 0,
+            logging.WARNING: 0,
+            logging.ERROR: 0,
+            logging.CRITICAL: 0
+        }
+
+        self.message_count = 0
+        
+        # Set up logging handler
+        self.log_handler = LogHandler(self)
+        logging.getLogger().addHandler(self.log_handler)
+    
+        # Create message type badges
+        self.badge_frame = ctk.CTkFrame(self.toolbar, fg_color="transparent")
+        self.badge_frame.pack(side="left", fill="x", expand=True)
+        
+        self.badges = {}
+        badge_configs = [
+            ("Debug", logging.DEBUG, "#6B8E23"),
+            ("Info", logging.INFO, "gray"),
+            ("Warning", logging.WARNING, "#FFD93D"),
+            ("Error", logging.ERROR, "#FF6B6B")
+        ]
+        
+        for label, level, color in badge_configs:
+            badge_container = ctk.CTkFrame(self.badge_frame, fg_color="transparent")
+            badge_container.pack(side="left", padx=10, pady=4)
+            
+            text_label = ctk.CTkLabel(badge_container, text=label)
+            text_label.pack(side="left")
+            
+            counter_label = ctk.CTkLabel(
+                badge_container,
+                text="0",
+                width=30,
+                height=30,
+                fg_color=color,
+                corner_radius=30,
+                text_color="black" if level == logging.WARNING else "white"
+            )
+            counter_label.pack(side="left", padx=(5, 0))
+            
+            self.badges[level] = counter_label
 
         # Add pop-out button
         self.pop_out_button = ctk.CTkButton(
@@ -69,28 +88,39 @@ class OutputConsole(ctk.CTkFrame):
             width=80,
             command=self.toggle_pop_out
         )
-        self.pop_out_button.pack(side="right", padx=5)
+        self.pop_out_button.pack(side="right", padx=5, pady=4)
 
-        # Initialize message counter
-        self.message_count = 0
-        
-        # Set up logging handler
-        self.log_handler = LogHandler(self)
-        logging.getLogger().addHandler(self.log_handler)
-    
-    def append_message(self, message: str, level: int = logging.INFO):
+    def append_message(self, message: TextOutputConsoleMessage):
         """Append a message to the console"""
-        print("Appending message:", message)
-        widget = LogMessageWidget(
-            self.scrollable_container,
-            message,
-            level
-        )
+        print("Appending message to console")
+        # Update counter for message level
+        self.message_counters[message.level] += 1
+        if message.level in self.badges:
+            count = self.message_counters[message.level]
+            display_text = "9+" if count > 9 else str(count)
+            self.badges[message.level].configure(text=display_text)
+        
+        # Create and add widget
+        if message.details is not None:
+            widget = CollapsibleLogMessageWidget(
+                self.scrollable_container,
+                message=message.msg,
+                level=message.level,
+                details=message.details,
+                action_text=message.action_text,
+                action_callback=message.action_callback
+            )
+        else:
+            widget = LogMessageWidget(
+                self.scrollable_container,
+                message.msg,
+                message.level
+            )
         widget.grid(row=self.message_count, column=0, sticky="ew", padx=2, pady=1)
         self.message_count += 1
         
         # Auto-scroll to bottom
-        self.scrollable_container._parent_canvas.yview_moveto(1.0)
+        self.scrollable_container._parent_canvas.yview_moveto(0.99)
 
     def toggle_pop_out(self):
         """Toggle between embedded and pop-out states"""
@@ -190,6 +220,11 @@ class OutputConsole(ctk.CTkFrame):
             self.popped_out = False
             self.update_visible_widgets()  # Refresh the main window widgets
 
+    def bind_pop_out_callback(self, callback):
+        """Bind a callback function to handle pop-out state changes"""
+        self._pop_out_callback = callback
+        
+
 class LogHandler(logging.Handler):
     def __init__(self, console):
         super().__init__()
@@ -197,4 +232,9 @@ class LogHandler(logging.Handler):
 
     def emit(self, record):
         msg = self.format(record)
-        self.console.append_message(msg, record.levelno)
+        message = TextOutputConsoleMessage(
+            msg=msg,
+            level=record.levelno,
+            details=getattr(record, 'details', None)
+        )
+        self.console.append_message(message)
