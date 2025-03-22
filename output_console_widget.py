@@ -60,9 +60,14 @@ class OutputConsole(ctk.CTkFrame):
             return "info"
         return "debug"
 
+    def bind_pop_out_callback(self, callback):
+        self._pop_out_callback = callback
+
     def toggle_pop_out(self):
         """Toggle between embedded and pop-out states"""
         if not self.popped_out:
+            if hasattr(self, '_pop_out_callback'):
+                self._pop_out_callback(True)
             # Create pop-out window
             self.popup_window = ctk.CTkToplevel(self)
             self.popup_window.title("Output Console")
@@ -107,6 +112,8 @@ class OutputConsole(ctk.CTkFrame):
             self.popup_window.protocol("WM_DELETE_WINDOW", self.toggle_pop_out)
             self.popped_out = True
         else:
+            if hasattr(self, '_pop_out_callback'):
+                self._pop_out_callback(False)
             # Copy content back to main text widget
             self.text_widget.configure(state="normal")
             self.text_widget.delete("1.0", "end")
