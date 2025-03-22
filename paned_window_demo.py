@@ -1,9 +1,14 @@
 import customtkinter as ctk
 from tkinter import ttk
 from output_console_widget import OutputConsole
+import logging
 
 class PanedWindowDemo:
     def __init__(self):
+        # Set up logger
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
+        
         self.root = ctk.CTk()
         self.root.title("Paned Window Demo")
         self.root.geometry("600x400")
@@ -62,6 +67,8 @@ class PanedWindowDemo:
     def increment_counter(self):
         self.counter += 1
         self.counter_label.configure(text=f"Count: {self.counter}")
+        # Use logger instead of direct append_message
+        self.logger.info(f"Counter incremented to: {self.counter}")
 
     def handle_console_pop_out(self, is_popped_out: bool):
         if is_popped_out:

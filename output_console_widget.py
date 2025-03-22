@@ -1,11 +1,45 @@
 import customtkinter as ctk
-import tkinter as tk
 from tkinter import ttk
-from typing import Optional
+from typing import Optional, List, Dict
 import logging
 
+class LogMessageWidget(ctk.CTkFrame):
+    def __init__(self, master, message: str, level: int, **kwargs):
+        super().__init__(master, **kwargs)
+        self.grid_columnconfigure(0, weight=1)
+        
+        bg_color = self._get_level_color(level)
+        self.configure(fg_color=bg_color)
+        
+        self.message_label = ctk.CTkLabel(
+            self,
+            text=message,
+            anchor="w",
+            justify="left",
+            wraplength=800
+        )
+        self.message_label.grid(row=0, column=0, sticky="ew", padx=5, pady=2)
+    
+    def _get_level_color(self, level: int) -> str:
+        if level >= logging.ERROR:
+            return "#3a2a2a"  # Dark red
+        elif level >= logging.WARNING:
+            return "#3a362a"  # Dark yellow
+        elif level >= logging.INFO:
+            return "transparent"
+        return "#2a2a3a"  # Dark blue for debug
+
 class OutputConsole(ctk.CTkFrame):
+    BUFFER_SIZE = 50  # Number of extra widgets to keep in memory
+    WIDGET_HEIGHT = 30  # Approximate height of each message widget
+
+    def bind_pop_out_callback(self, callback):
+        """Bind a callback function to handle pop-out state changes"""
+        self._pop_out_callback = callback
+        
     def __init__(self, master, **kwargs):
+        self.popped_out = False
+        self.popup_window = None
         super().__init__(master, **kwargs)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
@@ -16,9 +50,13 @@ class OutputConsole(ctk.CTkFrame):
         self.content_frame.grid_rowconfigure(0, weight=1)
         self.content_frame.grid_columnconfigure(0, weight=1)
 
-        # Create text widget with scrollbar
-        self.text_widget = ctk.CTkTextbox(self.content_frame, wrap="none")
-        self.text_widget.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        # Create scrollable frame container
+        self.scrollable_container = ctk.CTkScrollableFrame(
+            self.content_frame,
+            label_text="Console Output"
+        )
+        self.scrollable_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.scrollable_container.grid_columnconfigure(0, weight=1)
 
         # Create toolbar frame
         self.toolbar = ctk.CTkFrame(self.content_frame)
@@ -33,37 +71,61 @@ class OutputConsole(ctk.CTkFrame):
         )
         self.pop_out_button.pack(side="right", padx=5)
 
-        # Initialize variables
-        self.popped_out = False
-        self.popup_window: Optional[ctk.CTkToplevel] = None
-        self.original_position = None
-
+        # Initialize message counter
+        self.message_count = 0
+        
         # Set up logging handler
         self.log_handler = LogHandler(self)
         logging.getLogger().addHandler(self.log_handler)
-
+    
     def append_message(self, message: str, level: int = logging.INFO):
-        """Append a message to the console with optional log level formatting"""
-        tag = self._get_tag_for_level(level)
-        self.text_widget.configure(state="normal")
-        self.text_widget.insert("end", message + "\n", tag)
-        self.text_widget.configure(state="disabled")
-        self.text_widget.see("end")
-
-    def _get_tag_for_level(self, level: int) -> str:
-        """Get the appropriate tag for the log level"""
-        if level >= logging.ERROR:
-            return "error"
-        elif level >= logging.WARNING:
-            return "warning"
-        elif level >= logging.INFO:
-            return "info"
-        return "debug"
-
-    def bind_pop_out_callback(self, callback):
-        self._pop_out_callback = callback
+        """Append a message to the console"""
+        print("Appending message:", message)
+        widget = LogMessageWidget(
+            self.scrollable_container,
+            message,
+            level
+        )
+        widget.grid(row=self.message_count, column=0, sticky="ew", padx=2, pady=1)
+        self.message_count += 1
+        
+        # Auto-scroll to bottom
+        self.scrollable_container._parent_canvas.yview_moveto(1.0)
 
     def toggle_pop_out(self):
+        """Toggle between embedded and pop-out states"""
+        if not self.popped_out:
+            if hasattr(self, '_pop_out_callback'):
+                self._pop_out_callback(True)
+            # Create pop-out window
+            self.popup_window = ctk.CTkToplevel(self)
+            self.popup_window.title("Output Console")
+            self.popup_window.geometry("600x400")
+            self.popup_window.grid_rowconfigure(0, weight=1)
+            self.popup_window.grid_columnconfigure(0, weight=1)
+            
+            # Move the content frame to pop-out window
+            self.content_frame.grid_remove()
+            self.content_frame.grid(in_=self.popup_window, row=0, column=0)
+            
+            # Handle window close
+            self.popup_window.protocol("WM_DELETE_WINDOW", self.toggle_pop_out)
+            self.popped_out = True
+        else:
+            if hasattr(self, '_pop_out_callback'):
+                self._pop_out_callback(False)
+            
+            # Move content frame back to main window
+            self.content_frame.grid_remove()
+            self.content_frame.grid(in_=self, row=0, column=0, sticky="nsew")
+            
+            # Clean up pop-out window
+            if self.popup_window:
+                self.popup_window.destroy()
+                self.popup_window = None
+            
+            self.popped_out = False
+
         """Toggle between embedded and pop-out states"""
         if not self.popped_out:
             if hasattr(self, '_pop_out_callback'):
@@ -82,14 +144,20 @@ class OutputConsole(ctk.CTkFrame):
             popup_frame = ctk.CTkFrame(self.popup_window)
             popup_frame.grid(row=0, column=0, sticky="nsew")
             popup_frame.grid_rowconfigure(0, weight=1)
-            popup_frame.grid_columnconfigure(0, weight=1)            
-            # Create new text widget for pop-out window
-            popup_text = ctk.CTkTextbox(popup_frame, wrap="none")
-            popup_text.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+            popup_frame.grid_columnconfigure(0, weight=1)
             
-            # Copy content from main text widget
-            popup_text.insert("1.0", self.text_widget.get("1.0", "end"))
-            popup_text.configure(state="disabled")
+            # Create new scrollable frame for pop-out window
+            self.popup_scrollable = ctk.CTkScrollableFrame(popup_frame)
+            self.popup_scrollable.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+            
+            # Copy all message widgets to pop-out window
+            for idx, msg in enumerate(self.messages):
+                widget = LogMessageWidget(
+                    self.popup_scrollable,
+                    msg['message'],
+                    msg['level']
+                )
+                widget.grid(row=idx, column=0, sticky="ew", padx=2, pady=1)
             
             # Create new toolbar for pop-out window
             popup_toolbar = ctk.CTkFrame(popup_frame)
@@ -104,21 +172,12 @@ class OutputConsole(ctk.CTkFrame):
             )
             popup_button.pack(side="right", padx=5)
             
-            # Store references to pop-out widgets
-            self.popup_text = popup_text
-            self.popup_toolbar = popup_toolbar
-            
             # Handle window close
             self.popup_window.protocol("WM_DELETE_WINDOW", self.toggle_pop_out)
             self.popped_out = True
         else:
             if hasattr(self, '_pop_out_callback'):
                 self._pop_out_callback(False)
-            # Copy content back to main text widget
-            self.text_widget.configure(state="normal")
-            self.text_widget.delete("1.0", "end")
-            self.text_widget.insert("1.0", self.popup_text.get("1.0", "end"))
-            self.text_widget.configure(state="disabled")
             
             # Show the content frame back in main window
             self.content_frame.grid()
@@ -127,10 +186,9 @@ class OutputConsole(ctk.CTkFrame):
             if self.popup_window:
                 self.popup_window.destroy()
                 self.popup_window = None
-                self.popup_text = None
-                self.popup_toolbar = None
             
             self.popped_out = False
+            self.update_visible_widgets()  # Refresh the main window widgets
 
 class LogHandler(logging.Handler):
     def __init__(self, console):
