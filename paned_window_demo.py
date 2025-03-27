@@ -20,7 +20,7 @@ class PanedWindowDemo:
         self.paned_window.pack(fill='both', expand=True)
 
         # Create top pane with counter
-        self.top_frame = ctk.CTkFrame(self.paned_window, fg_color='red')
+        self.top_frame = ctk.CTkFrame(self.paned_window)
         
         # Counter variable
         self.counter = 0
